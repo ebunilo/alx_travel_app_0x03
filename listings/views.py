@@ -9,12 +9,7 @@ import uuid
 
 from .models import Listing, Booking, Payment
 from .serializers import ListingSerializer, BookingSerializer
-
-# Try to import a Celery task for sending confirmation emails if available
-try:
-    from .tasks import send_payment_confirmation_email  # define in your app if not present
-except Exception:
-    send_payment_confirmation_email = None
+from .tasks import send_booking_confirmation_email
 
 # Create your views here.
 
@@ -33,6 +28,18 @@ class BookingViewSet(viewsets.ModelViewSet):
         response = super().create(request, *args, **kwargs)
         if response.status_code not in (drf_status.HTTP_201_CREATED,):
             return response
+
+        booking = Booking.objects.get(pk=response.data['id'])
+        # Trigger email task asynchronously
+        send_booking_confirmation_email.delay(
+            to_email=booking.guest.email,
+            booking_id=booking.id,
+            listing_title=booking.listing.title,
+            guest_name=booking.guest.get_full_name() or booking.guest.username,
+            start_date=booking.start_date,
+            end_date=booking.end_date,
+            total_price=str(booking.total_price),
+        )
 
         booking_id = response.data.get("id")
         # Derive payment fields
